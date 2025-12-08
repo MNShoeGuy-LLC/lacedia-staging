@@ -2,12 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>LACEDiA Beta v4 - Complete Authentication System</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="description" content="Professional sneaker authentication with AI-powered analysis">
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
+    :root {
             --dark-bg: #0d1117;
             --darker-bg: #161b22;
             --primary-blue: #58a6ff;
@@ -1339,85 +1334,154 @@
         </section>
     </div>
 
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+
     <script>
+        // Optional Firebase setup - replace firebaseConfig values with your project credentials
+        let firebaseAvailable = false;
+        try {
+            if (typeof firebase !== 'undefined') {
+                const firebaseConfig = {
+                    apiKey: "AIzaSyAACRufzVuvHqu5eEBc7UQLt-mbBQgzWys",
+                    authDomain: "lacedia-beta.firebaseapp.com",
+                    projectId: "lacedia-beta",
+                    storageBucket: "lacedia-beta.firebasestorage.app",
+                    messagingSenderId: "22006138380",
+                    appId: "1:22006138380:web:4f809433c66f2e286ed029",
+                    measurementId: "G-JVP4EQJWC3"
+                };
+                firebase.initializeApp(firebaseConfig);
+                firebaseAvailable = true;
+                // Debug: print app count and effective config to browser console
+                try {
+                    console.log('Firebase apps:', firebase.apps.length);
+                    console.log('Firebase config in page:', firebase.app().options);
+                } catch (e) {
+                    console.warn('Firebase debug log failed:', e);
+                }
+            }
+        } catch (err) {
+            console.warn('Firebase not available or failed to initialize:', err);
+            firebaseAvailable = false;
+        }
+
         let authPhotos = new Array(10).fill(null);
         let selectedTier = null;
         let currentPhotoIndex = null;
         let isAuthenticated = false;
 
-        // SIMPLE WORKING LOGIN
-        function handleLogin(e) {
+        // AUTHENTICATION: prefer Firebase if configured, otherwise fall back to local beta behavior
+        async function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('loginEmail').value.trim();
             const password = document.getElementById('loginPassword').value;
-            
-            if (email && password) {
-                // ANY email/password works for beta
-                const user = {
-                    name: email.split('@')[0],
-                    email: email
-                };
-                
-                loginSuccess(user);
-            } else {
+
+            if (!email || !password) {
                 alert('❌ Please fill in all fields');
+                return;
+            }
+
+            if (firebaseAvailable) {
+                try {
+                    const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+                    const fbUser = userCredential.user;
+                    // Attempt to fetch profile name from Firestore
+                    let name = fbUser.displayName || email.split('@')[0];
+                    try {
+                        const doc = await firebase.firestore().collection('users').doc(fbUser.uid).get();
+                        if (doc.exists && doc.data().name) name = doc.data().name;
+                    } catch (err) { /* ignore */ }
+                    loginSuccess({ name, email: fbUser.email, uid: fbUser.uid });
+                } catch (err) {
+                    alert('Login failed: ' + err.message);
+                }
+            } else {
+                // Local beta fallback: any credentials work
+                const user = { name: email.split('@')[0], email };
+                loginSuccess(user);
             }
         }
 
-        function handleSignup(e) {
+        async function handleSignup(e) {
             e.preventDefault();
             const name = document.getElementById('signupName').value.trim();
             const email = document.getElementById('signupEmail').value.trim();
             const password = document.getElementById('signupPassword').value;
             const businessType = document.getElementById('businessType').value;
             const agreeTerms = document.getElementById('agreeTerms').checked;
-            
-            if (name && email && password && businessType && agreeTerms) {
-                const user = {
-                    name: name,
-                    email: email
-                };
-                
-                // Send signup email
+
+            if (!name || !email || !password || !businessType || !agreeTerms) {
+                alert('❌ Please fill in all fields and agree to terms');
+                return;
+            }
+
+            if (firebaseAvailable) {
+                try {
+                    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+                    const fbUser = userCredential.user;
+                    await firebase.firestore().collection('users').doc(fbUser.uid).set({
+                        name,
+                        email,
+                        businessType,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        authCount: 0,
+                        tier: 'beta_tester',
+                        accuracyStats: { totalAuthentications: 0, correctPredictions: 0, incorrectPredictions: 0 }
+                    });
+                    loginSuccess({ name, email: fbUser.email, uid: fbUser.uid });
+                } catch (err) {
+                    alert('Signup failed: ' + err.message);
+                }
+            } else {
+                // Local fallback: send signup email and proceed
+                const user = { name, email };
                 emailSignup(user);
                 loginSuccess(user);
-            } else {
-                alert('❌ Please fill in all fields and agree to terms');
             }
         }
 
         function loginSuccess(user) {
             isAuthenticated = true;
-            
+
             // Hide modal
             document.getElementById('accountModal').style.display = 'none';
-            
+
             // Show account header
             document.getElementById('accountHeader').style.display = 'flex';
             document.getElementById('userName').textContent = user.name;
             document.getElementById('userEmail').textContent = user.email;
-            document.getElementById('userAvatar').textContent = user.name.charAt(0).toUpperCase();
-            
+            document.getElementById('userAvatar').textContent = (user.name || user.email || 'U').charAt(0).toUpperCase();
+
             // Save session
             localStorage.setItem('lacediaUser', JSON.stringify(user));
-            
+
             alert(`🎉 Welcome to LACEDiA, ${user.name}!\n\nYour beta account is active. Select a tier and start testing!`);
         }
 
-        function logout() {
-            if (confirm('Logout?')) {
-                isAuthenticated = false;
-                localStorage.removeItem('lacediaUser');
-                
-                // Reset everything
-                authPhotos = new Array(10).fill(null);
-                selectedTier = null;
-                resetPhotoGrid();
-                
-                // Show modal
-                document.getElementById('accountModal').style.display = 'flex';
-                document.getElementById('accountHeader').style.display = 'none';
+        async function logout() {
+            if (!confirm('Logout?')) return;
+
+            if (firebaseAvailable) {
+                try {
+                    await firebase.auth().signOut();
+                } catch (err) {
+                    console.warn('Firebase signOut failed:', err);
+                }
             }
+
+            isAuthenticated = false;
+            localStorage.removeItem('lacediaUser');
+
+            // Reset everything
+            authPhotos = new Array(10).fill(null);
+            selectedTier = null;
+            resetPhotoGrid();
+
+            // Show modal
+            document.getElementById('accountModal').style.display = 'flex';
+            document.getElementById('accountHeader').style.display = 'none';
         }
 
         function switchAuthTab(tab) {
@@ -1868,4 +1932,8 @@ Certificate ID: LACEDIA-V4-${Date.now()}`;
         });
     </script>
 </body>
-</html>
+</html>  <title>LACEDiA Beta v4 - Complete Authentication System</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Professional sneaker authentication with AI-powered analysis">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
